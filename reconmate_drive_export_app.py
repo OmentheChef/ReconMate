@@ -21,23 +21,24 @@ provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "OpenRouter"])
 api_key = st.sidebar.text_input("API Key", type="password")
 model = st.sidebar.selectbox("Model", ["gpt-4", "claude-3.5-sonnet", "deepseek-r1"])
 
-# --- Model Map (Fixed DeepSeek model) ---
+# --- Model Map (latest GPT-4 Vision + fixed DeepSeek) ---
 model_map = {
-    "gpt-4": "gpt-4-1106-vision-preview",  # ✅ New GPT-4 Vision model
+    "gpt-4": "gpt-4-vision",  # ✅ CURRENT valid model
     "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
-    "deepseek-r1": "deepseek-ai/deepseek-chat"  # ✅ Correct DeepSeek model ID
+    "deepseek-r1": "deepseek-ai/deepseek-chat"
 }
 
-# --- API Key Check ---
+# --- API KEY + MODEL VALIDATION ---
 if not api_key:
     st.warning("⚠️ Please enter your API key in the sidebar to continue.")
     st.stop()
 
 model_id = model_map.get(model)
 if not model_id:
-    st.error("❌ Invalid model selection.")
+    st.error("❌ Invalid model selected.")
     st.stop()
 
+# --- API Base URL ---
 if provider == "OpenAI":
     base_url = "https://api.openai.com/v1/chat/completions"
 else:
@@ -60,7 +61,7 @@ if uploaded_file:
         image_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
         vision_payload = {
-            "model": "gpt-4-1106-vision-preview",
+            "model": "gpt-4-vision",
             "messages": [
                 {
                     "role": "user",
@@ -81,10 +82,13 @@ if uploaded_file:
             "max_tokens": 1000
         }
 
-        response = requests.post("https://api.openai.com/v1/chat/completions",
-                                 headers=headers, json=vision_payload)
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=vision_payload
+        )
 
-    # === Claude / DeepSeek with OCR ===
+    # === Claude / DeepSeek + OCR ===
     else:
         st.info("🔍 Using OCR + Claude/DeepSeek")
         image = Image.open(uploaded_file)
@@ -126,7 +130,7 @@ Receipt Text:
 
         response = requests.post(base_url, headers=headers, json=payload)
 
-    # === PARSE RESPONSE ===
+    # === PARSE AI RESPONSE ===
     if response.status_code == 200:
         ai_reply = response.json()["choices"][0]["message"]["content"]
 
@@ -148,7 +152,7 @@ Receipt Text:
         except:
             st.write(response.text)
 
-# === DISPLAY + EXPORT ===
+# === DATA TABLE + EXPORT ===
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
     st.subheader("📊 Recon Table")
