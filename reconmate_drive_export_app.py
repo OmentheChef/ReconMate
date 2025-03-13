@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pytesseract
 from PIL import Image
@@ -9,15 +8,15 @@ from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 import requests
 
-# --- CONFIG ---
+# --- APP CONFIG ---
 st.set_page_config(page_title="ReconMate AI", layout="centered")
 st.title("🎬 ReconMate AI – Smart Receipt Categorizer & Google Drive Export")
 
-# --- STATE INIT ---
+# --- SESSION STATE INIT ---
 if "data" not in st.session_state:
     st.session_state.data = []
 
-# --- SIDEBAR SETTINGS ---
+# --- SIDEBAR: API KEYS & SETTINGS ---
 st.sidebar.header("🔐 API Setup")
 provider = st.sidebar.selectbox("Choose LLM Provider", ["OpenAI", "OpenRouter"])
 api_key = st.sidebar.text_input("API Key", type="password")
@@ -45,7 +44,7 @@ else:
         "gpt-4": "gpt-4"
     }
 
-# --- UPLOAD RECEIPT ---
+# --- RECEIPT UPLOAD ---
 uploaded_file = st.file_uploader("📤 Upload Receipt", type=["png", "jpg", "jpeg"])
 if uploaded_file:
     img = Image.open(uploaded_file)
@@ -56,13 +55,15 @@ if uploaded_file:
 
     st.text_area("🧾 OCR Result", ocr_text, height=150)
 
+    # --- AI ANALYSIS ---
     if st.button("🧠 Analyze with AI"):
-        prompt = f"""You are a film production assistant. A team member submitted this receipt. Your job is to extract and label the key info.
+        prompt = f"""
+You are a film production assistant. A team member submitted this receipt. Your job is to extract and label the key info.
 
 OCR TEXT:
-"""
+\"\"\"
 {ocr_text}
-"""
+\"\"\"
 
 Return:
 - Vendor
@@ -90,7 +91,7 @@ Return:
             st.subheader("✅ AI Result")
             st.markdown(content)
 
-            # Save to session state
+            # Save record to session
             st.session_state.data.append({
                 "Date": datetime.now().strftime("%Y-%m-%d"),
                 "Vendor": uploaded_file.name,
@@ -98,32 +99,31 @@ Return:
                 "OCR": ocr_text
             })
         else:
-            st.error("API Error")
+            st.error("❌ API Error")
             st.json(response.json())
 
-# --- SHOW CURRENT SESSION DATA ---
+# --- DATA TABLE DISPLAY ---
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
-    st.subheader("📊 Receipt Log This Session")
+    st.subheader("📊 Receipt Log (This Session)")
     st.dataframe(df)
 
-    # --- SAVE AND EXPORT ---
-    if st.button("💾 Save and Upload Monthly Report to Google Drive"):
+    # --- EXPORT TO GOOGLE DRIVE ---
+    if st.button("💾 Save & Upload Monthly Report to Google Drive"):
         now = datetime.now()
         filename = f"ReconMate_Report_{now.strftime('%Y_%m')}.xlsx"
         filepath = os.path.join("data", filename)
         os.makedirs("data", exist_ok=True)
         df.to_excel(filepath, index=False)
 
-        # Google Drive Upload
         try:
             gauth = GoogleAuth()
-            gauth.LocalWebserverAuth()
+            gauth.LocalWebserverAuth()  # Opens browser for first-time auth
             drive = GoogleDrive(gauth)
 
             file = drive.CreateFile({'title': filename})
             file.SetContentFile(filepath)
             file.Upload()
-            st.success("📤 Uploaded to Google Drive!")
+            st.success(f"✅ Uploaded {filename} to Google Drive")
         except Exception as e:
             st.error(f"Upload failed: {e}")
