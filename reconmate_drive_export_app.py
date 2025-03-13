@@ -1,171 +1,154 @@
 import streamlit as st
-import os
-from PIL import Image
-import easyocr
-import numpy as np
-import pandas as pd
+import base64
 import requests
 import json
 from datetime import datetime
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
+import pandas as pd
+import easyocr
+import numpy as np
+from PIL import Image
 
 # --- CONFIG ---
-st.set_page_config(page_title="ReconMate – Multi-Receipt Recon", layout="centered")
-st.title("🎬 ReconMate – Multi-Receipt Scanner & Recon")
+st.set_page_config(page_title="ReconMate Vision – Debug", layout="centered")
+st.title("🔍 ReconMate Vision – Debug Mode")
 
-# --- SESSION ---
 if "data" not in st.session_state:
     st.session_state.data = []
 
 # --- SIDEBAR ---
 st.sidebar.header("🔐 API Setup")
-provider = st.sidebar.selectbox("AI Provider", ["OpenAI", "OpenRouter"])
+provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "OpenRouter"])
 api_key = st.sidebar.text_input("API Key", type="password")
-model = st.sidebar.selectbox("Model", ["gpt-4", "deepseek-chat", "claude-3-sonnet", "claude-3-opus"])
+model = st.sidebar.selectbox("Model", ["gpt-4", "claude-3.5-sonnet", "deepseek-r1"])
 
-# --- MODEL MAP ---
 model_map = {
-    "gpt-4": "openai/gpt-4",
-    "deepseek-chat": "deepseek-chat",
-    "claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
-    "claude-3-opus": "anthropic/claude-3-opus-20240229",
+    "gpt-4": "gpt-4",
+    "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
+    "deepseek-r1": "deepseek-ai/deepseek-moe-16b-chat"
 }
 
-if provider == "OpenRouter":
-    base_url = "https://openrouter.ai/api/v1/chat/completions"
-else:
+if provider == "OpenAI":
     base_url = "https://api.openai.com/v1/chat/completions"
+else:
+    base_url = "https://openrouter.ai/api/v1/chat/completions"
 
 headers = {
     "Authorization": f"Bearer {api_key}",
     "Content-Type": "application/json"
 }
 
-# --- IMAGE UPLOAD ---
-uploaded_file = st.file_uploader("📤 Upload Image with Multiple Receipts", type=["png", "jpg", "jpeg"])
+model_id = model_map.get(model)
+if not model_id:
+    st.error("Invalid model selected.")
+    st.stop()
+
+# --- FILE UPLOAD ---
+uploaded_file = st.file_uploader("📤 Upload Receipt Image", type=["jpg", "jpeg", "png"])
 if uploaded_file:
-    img = Image.open(uploaded_file)
-    st.image(img, caption="🧾 Multi-Receipt Image", use_container_width=True)
+    st.image(uploaded_file, caption="🧾 Uploaded Receipt", use_container_width=True)
+    file_bytes = uploaded_file.read()
 
-    # --- OCR with Rotation ---
-    with st.spinner("🔍 Running OCR on all angles..."):
+    # GPT-4 Vision Path
+    if model == "gpt-4":
+        st.info("🧠 Using GPT-4 Vision")
+        image_b64 = base64.b64encode(file_bytes).decode("utf-8")
+
+        vision_payload = {
+            "model": "gpt-4-vision-preview",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Extract this receipt as JSON: vendor_name, date, total_amount, tax_amount, currency, payment_method, category (Food, Transport, etc), and notes."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 1000
+        }
+
+        response = requests.post("https://api.openai.com/v1/chat/completions",
+                                 headers=headers, json=vision_payload)
+
+    # Claude 3.5 or DeepSeek R1 with OCR
+    else:
+        st.info("🔎 Using EasyOCR + Claude/DeepSeek")
+        image = Image.open(uploaded_file)
         reader = easyocr.Reader(['en'], gpu=False)
+        ocr_text = "\n".join(reader.readtext(np.array(image), detail=0))
+        st.subheader("🧾 OCR Output")
+        st.text_area("Extracted OCR Text", ocr_text, height=200)
 
-        def get_text_rotations(image):
-            rotations = [
-                image,
-                image.rotate(90, expand=True),
-                image.rotate(180, expand=True),
-                image.rotate(270, expand=True)
-            ]
-            texts = []
-            for rot_img in rotations:
-                img_np = np.array(rot_img)
-                lines = reader.readtext(img_np, detail=0)
-                texts.append("\n".join(lines))
-            return "\n\n---\n\n".join(texts)
-
-        full_text = get_text_rotations(img)
-
-    st.subheader("🧾 Combined OCR Result (all angles)")
-    st.text_area("OCR Text", full_text, height=250)
-
-    # --- SPLIT RECEIPTS ---
-    st.markdown("### 🧩 Split & Analyze Receipts")
-    receipts = full_text.split("Total")
-    receipts = [r.strip() + " Total" for r in receipts if r.strip()]
-    st.info(f"🔍 Detected {len(receipts)} possible receipt(s)")
-
-    structured_data = []
-
-    for idx, receipt_text in enumerate(receipts):
-        with st.spinner(f"Analyzing receipt {idx+1}..."):
-            model_id = model_map.get(model)
-            if not model_id:
-                st.error("Model not supported.")
-                st.stop()
-
-            prompt = f"""
+        prompt = f"""
 You are a film production finance assistant.
 
-From the following receipt text, extract accurate structured data. Do not guess or invent fields — leave them blank if missing.
-
-Return ONLY a JSON object with:
+From the following receipt text, extract structured data in JSON format with these fields:
 - vendor_name
 - date
 - total_amount
 - tax_amount
-- currency (e.g., ZAR, USD)
-- payment_method (e.g., Credit Card, Cash, EFT)
-- category: one of ["Food", "Transport", "Props", "Accommodation", "Fuel", "Other"]
-- notes: short context for the expense
+- currency
+- payment_method
+- category (choose from: Food, Transport, Props, Accommodation, Fuel, Other)
+- notes
 
-OCR TEXT:
+Do not guess. Leave fields blank if missing.
+
+Receipt Text:
 \"\"\"
-{receipt_text}
+{ocr_text}
 \"\"\"
 """
 
-            payload = {
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant for film producers."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.2
-            }
+        payload = {
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant for film producers."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3
+        }
 
-            response = requests.post(base_url, headers=headers, json=payload)
+        response = requests.post(base_url, headers=headers, json=payload)
 
-            if response.status_code == 200:
-                ai_reply = response.json()["choices"][0]["message"]["content"]
-                try:
-                    parsed = json.loads(ai_reply)
-                    structured_data.append(parsed)
-                except json.JSONDecodeError:
-                    structured_data.append({
-                        "vendor_name": "",
-                        "date": "",
-                        "total_amount": "",
-                        "tax_amount": "",
-                        "currency": "",
-                        "payment_method": "",
-                        "category": "",
-                        "notes": f"⚠️ Could not parse JSON for receipt {idx+1}"
-                    })
-            else:
-                structured_data.append({
-                    "vendor_name": "",
-                    "date": "",
-                    "total_amount": "",
-                    "tax_amount": "",
-                    "currency": "",
-                    "payment_method": "",
-                    "category": "",
-                    "notes": f"❌ API error {response.status_code}"
-                })
-
-    # --- DISPLAY RESULTS ---
-    df = pd.DataFrame(structured_data)
-    st.subheader("📊 Structured Recon Data")
-    st.dataframe(df)
-
-    # --- EXPORT TO GOOGLE DRIVE ---
-    if st.button("📤 Export to Google Drive"):
-        now = datetime.now()
-        filename = f"ReconMate_Multi_Receipt_{now.strftime('%Y_%m')}.xlsx"
-        filepath = os.path.join("data", filename)
-        os.makedirs("data", exist_ok=True)
-        df.to_excel(filepath, index=False)
+    # --- AI RESPONSE ---
+    if response.status_code == 200:
+        ai_reply = response.json()["choices"][0]["message"]["content"]
+        st.subheader("🧠 Raw AI Output")
+        st.text_area("Raw Response", ai_reply, height=200)
 
         try:
-            gauth = GoogleAuth()
-            gauth.LocalWebserverAuth()
-            drive = GoogleDrive(gauth)
-            file = drive.CreateFile({'title': filename})
-            file.SetContentFile(filepath)
-            file.Upload()
-            st.success(f"✅ Uploaded '{filename}' to Google Drive!")
+            parsed = json.loads(ai_reply)
+            st.success("✅ JSON parsed successfully!")
+            st.json(parsed)
+            st.session_state.data.append(parsed)
         except Exception as e:
-            st.error(f"Google Drive upload failed: {e}")
+            st.error("❌ Could not parse JSON from AI output.")
+            st.text(ai_reply)
+
+    else:
+        st.error("❌ API Error")
+        try:
+            st.json(response.json())
+        except:
+            st.write(response.text)
+
+# --- TABLE + EXPORT ---
+if st.session_state.data:
+    df = pd.DataFrame(st.session_state.data)
+    st.subheader("📊 Recon Table")
+    st.dataframe(df)
+
+    if st.button("📥 Export to Excel"):
+        filename = f"recon_debug_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        df.to_excel(filename, index=False)
+        with open(filename, "rb") as f:
+            st.download_button("Download Excel", f, file_name=filename)
