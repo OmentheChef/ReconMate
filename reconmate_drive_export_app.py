@@ -22,7 +22,7 @@ api_key = st.sidebar.text_input("API Key", type="password")
 model = st.sidebar.selectbox("Model", ["gpt-4", "claude-3.5-sonnet", "deepseek-r1"])
 
 model_map = {
-    "gpt-4": "gpt-4",
+    "gpt-4": "gpt-4-1106-vision-preview",  # ✅ Updated Vision Model
     "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
     "deepseek-r1": "deepseek-ai/deepseek-moe-16b-chat"
 }
@@ -48,20 +48,20 @@ if uploaded_file:
     st.image(uploaded_file, caption="🧾 Uploaded Receipt", use_container_width=True)
     file_bytes = uploaded_file.read()
 
-    # GPT-4 Vision Path
+    # === GPT-4 Vision Route ===
     if model == "gpt-4":
         st.info("🧠 Using GPT-4 Vision")
         image_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
         vision_payload = {
-            "model": "gpt-4-vision-preview",
+            "model": "gpt-4-1106-vision-preview",
             "messages": [
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "Extract this receipt as JSON: vendor_name, date, total_amount, tax_amount, currency, payment_method, category (Food, Transport, etc), and notes."
+                            "text": "Extract this receipt as JSON. Fields: vendor_name, date, total_amount, tax_amount, currency, payment_method, category (Food, Transport, etc), and notes."
                         },
                         {
                             "type": "image_url",
@@ -75,17 +75,21 @@ if uploaded_file:
             "max_tokens": 1000
         }
 
-        response = requests.post("https://api.openai.com/v1/chat/completions",
-                                 headers=headers, json=vision_payload)
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=vision_payload
+        )
 
-    # Claude 3.5 or DeepSeek R1 with OCR
+    # === Claude / DeepSeek with OCR ===
     else:
-        st.info("🔎 Using EasyOCR + Claude/DeepSeek")
+        st.info("🔍 Using OCR + Claude/DeepSeek")
         image = Image.open(uploaded_file)
         reader = easyocr.Reader(['en'], gpu=False)
         ocr_text = "\n".join(reader.readtext(np.array(image), detail=0))
+
         st.subheader("🧾 OCR Output")
-        st.text_area("Extracted OCR Text", ocr_text, height=200)
+        st.text_area("OCR Text", ocr_text, height=200)
 
         prompt = f"""
 You are a film production finance assistant.
@@ -119,11 +123,12 @@ Receipt Text:
 
         response = requests.post(base_url, headers=headers, json=payload)
 
-    # --- AI RESPONSE ---
+    # === PARSE RESPONSE ===
     if response.status_code == 200:
         ai_reply = response.json()["choices"][0]["message"]["content"]
+
         st.subheader("🧠 Raw AI Output")
-        st.text_area("Raw Response", ai_reply, height=200)
+        st.text_area("AI Response", ai_reply, height=200)
 
         try:
             parsed = json.loads(ai_reply)
@@ -131,9 +136,8 @@ Receipt Text:
             st.json(parsed)
             st.session_state.data.append(parsed)
         except Exception as e:
-            st.error("❌ Could not parse JSON from AI output.")
+            st.error("❌ Could not parse AI response as JSON.")
             st.text(ai_reply)
-
     else:
         st.error("❌ API Error")
         try:
@@ -141,7 +145,7 @@ Receipt Text:
         except:
             st.write(response.text)
 
-# --- TABLE + EXPORT ---
+# === DISPLAY + EXPORT ===
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
     st.subheader("📊 Recon Table")
