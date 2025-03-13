@@ -9,8 +9,8 @@ from pydrive.drive import GoogleDrive
 import requests
 
 # --- APP CONFIG ---
-st.set_page_config(page_title="ReconMate AI", layout="centered")
-st.title("🎬 ReconMate AI – Smart Receipt Categorizer & Google Drive Export")
+st.set_page_config(page_title="ReconMate", layout="centered")
+st.title("🎬 ReconMate – Film Recons Made Easy")
 
 # --- SESSION STATE INIT ---
 if "data" not in st.session_state:
