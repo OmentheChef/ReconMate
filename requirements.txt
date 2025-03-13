@@ -1,6 +1,7 @@
 streamlit
-pytesseract
-Pillow
 pandas
-pydrive
 requests
+pydrive
+easyocr
+pillow
+torch
