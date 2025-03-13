@@ -21,11 +21,22 @@ provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "OpenRouter"])
 api_key = st.sidebar.text_input("API Key", type="password")
 model = st.sidebar.selectbox("Model", ["gpt-4", "claude-3.5-sonnet", "deepseek-r1"])
 
+# --- Model Map (Fixed DeepSeek model) ---
 model_map = {
-    "gpt-4": "gpt-4-1106-vision-preview",  # ✅ Updated Vision Model
+    "gpt-4": "gpt-4-1106-vision-preview",  # ✅ New GPT-4 Vision model
     "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
-    "deepseek-r1": "deepseek-ai/deepseek-moe-16b-chat"
+    "deepseek-r1": "deepseek-ai/deepseek-chat"  # ✅ Correct DeepSeek model ID
 }
+
+# --- API Key Check ---
+if not api_key:
+    st.warning("⚠️ Please enter your API key in the sidebar to continue.")
+    st.stop()
+
+model_id = model_map.get(model)
+if not model_id:
+    st.error("❌ Invalid model selection.")
+    st.stop()
 
 if provider == "OpenAI":
     base_url = "https://api.openai.com/v1/chat/completions"
@@ -37,18 +48,13 @@ headers = {
     "Content-Type": "application/json"
 }
 
-model_id = model_map.get(model)
-if not model_id:
-    st.error("Invalid model selected.")
-    st.stop()
-
 # --- FILE UPLOAD ---
 uploaded_file = st.file_uploader("📤 Upload Receipt Image", type=["jpg", "jpeg", "png"])
 if uploaded_file:
     st.image(uploaded_file, caption="🧾 Uploaded Receipt", use_container_width=True)
     file_bytes = uploaded_file.read()
 
-    # === GPT-4 Vision Route ===
+    # === GPT-4 Vision ===
     if model == "gpt-4":
         st.info("🧠 Using GPT-4 Vision")
         image_b64 = base64.b64encode(file_bytes).decode("utf-8")
@@ -75,11 +81,8 @@ if uploaded_file:
             "max_tokens": 1000
         }
 
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=vision_payload
-        )
+        response = requests.post("https://api.openai.com/v1/chat/completions",
+                                 headers=headers, json=vision_payload)
 
     # === Claude / DeepSeek with OCR ===
     else:
