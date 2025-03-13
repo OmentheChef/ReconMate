@@ -4,6 +4,7 @@ import requests
 import json
 from datetime import datetime
 import pandas as pd
+import openpyxl  # ✅ Required for Excel export
 import easyocr
 import numpy as np
 from PIL import Image
@@ -17,33 +18,38 @@ if "data" not in st.session_state:
 
 # --- SIDEBAR ---
 st.sidebar.header("🔐 API Setup")
-provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "OpenRouter"])
-api_key = st.sidebar.text_input("API Key", type="password")
-model = st.sidebar.selectbox("Model", ["gpt-4", "claude-3.5-sonnet", "deepseek-r1"])
 
-# --- Model Map (latest GPT-4 Vision + fixed DeepSeek) ---
-model_map = {
-    "gpt-4": "gpt-4-vision",  # ✅ CURRENT valid model
-    "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
-    "deepseek-r1": "deepseek-ai/deepseek-chat"
+# Select provider
+provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "OpenRouter"])
+
+# Models per provider
+provider_models = {
+    "OpenAI": {
+        "gpt-4": "gpt-4-vision"
+    },
+    "OpenRouter": {
+        "claude-3.5-sonnet": "anthropic/claude-3-sonnet-20240229",
+        "deepseek-r1": "deepseek-ai/deepseek-chat"
+    }
 }
 
-# --- API KEY + MODEL VALIDATION ---
+available_models = list(provider_models[provider].keys())
+model = st.sidebar.selectbox("Model", available_models)
+
+# API Key input
+api_key = st.sidebar.text_input("API Key", type="password")
 if not api_key:
-    st.warning("⚠️ Please enter your API key in the sidebar to continue.")
+    st.warning("⚠️ Please enter your API key to continue.")
     st.stop()
 
-model_id = model_map.get(model)
+# Validate model
+model_id = provider_models[provider].get(model)
 if not model_id:
     st.error("❌ Invalid model selected.")
     st.stop()
 
-# --- API Base URL ---
-if provider == "OpenAI":
-    base_url = "https://api.openai.com/v1/chat/completions"
-else:
-    base_url = "https://openrouter.ai/api/v1/chat/completions"
-
+# Set API endpoint
+base_url = "https://api.openai.com/v1/chat/completions" if provider == "OpenAI" else "https://openrouter.ai/api/v1/chat/completions"
 headers = {
     "Authorization": f"Bearer {api_key}",
     "Content-Type": "application/json"
@@ -55,13 +61,13 @@ if uploaded_file:
     st.image(uploaded_file, caption="🧾 Uploaded Receipt", use_container_width=True)
     file_bytes = uploaded_file.read()
 
-    # === GPT-4 Vision ===
-    if model == "gpt-4":
+    # === GPT-4 Vision (OpenAI) ===
+    if provider == "OpenAI" and model == "gpt-4":
         st.info("🧠 Using GPT-4 Vision")
         image_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
         vision_payload = {
-            "model": "gpt-4-vision",
+            "model": model_id,
             "messages": [
                 {
                     "role": "user",
@@ -82,13 +88,9 @@ if uploaded_file:
             "max_tokens": 1000
         }
 
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=vision_payload
-        )
+        response = requests.post(base_url, headers=headers, json=vision_payload)
 
-    # === Claude / DeepSeek + OCR ===
+    # === Claude / DeepSeek with OCR ===
     else:
         st.info("🔍 Using OCR + Claude/DeepSeek")
         image = Image.open(uploaded_file)
@@ -152,7 +154,7 @@ Receipt Text:
         except:
             st.write(response.text)
 
-# === DATA TABLE + EXPORT ===
+# === EXPORT + DISPLAY ===
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
     st.subheader("📊 Recon Table")
