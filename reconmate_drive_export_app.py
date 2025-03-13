@@ -1,45 +1,40 @@
 import streamlit as st
-import pytesseract
 from PIL import Image
 import pandas as pd
 import os
+import requests
+import easyocr
 from datetime import datetime
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
-import requests
 
-# --- APP CONFIG ---
-st.set_page_config(page_title="ReconMate", layout="centered")
+# --- CONFIG ---
+st.set_page_config(page_title="ReconMate – Film Recons Made Easy", layout="centered")
 st.title("🎬 ReconMate – Film Recons Made Easy")
 
-# --- SESSION STATE INIT ---
+# --- SESSION DATA ---
 if "data" not in st.session_state:
     st.session_state.data = []
 
 # --- SIDEBAR: API KEYS & SETTINGS ---
-st.sidebar.header("🔐 API Setup")
+st.sidebar.header("🔐 AI & Export Settings")
 provider = st.sidebar.selectbox("Choose LLM Provider", ["OpenAI", "OpenRouter"])
 api_key = st.sidebar.text_input("API Key", type="password")
 model = st.sidebar.selectbox("Model", ["gpt-4", "deepseek-chat", "claude-3-sonnet", "claude-3-opus"])
 
+# Map models
 if provider == "OpenRouter":
     base_url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     model_map = {
         "gpt-4": "openai/gpt-4",
-        "deepseek-chat": "deepseek-ai/deepseek-chat",
+        "deepseek-chat": "deepseek-chat",
         "claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
-        "claude-3-opus": "anthropic/claude-3-opus-20240229"
+        "claude-3-opus": "anthropic/claude-3-opus-20240229",
     }
 else:
     base_url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     model_map = {
         "gpt-4": "gpt-4"
     }
@@ -48,10 +43,12 @@ else:
 uploaded_file = st.file_uploader("📤 Upload Receipt", type=["png", "jpg", "jpeg"])
 if uploaded_file:
     img = Image.open(uploaded_file)
-    st.image(img, caption="🧾 Receipt Preview", use_column_width=True)
+    st.image(img, caption="🧾 Receipt Preview", use_container_width=True)
 
-    with st.spinner("🔍 Extracting text..."):
-        ocr_text = pytesseract.image_to_string(img)
+    with st.spinner("🔍 Extracting text using OCR..."):
+        reader = easyocr.Reader(['en'], gpu=False)
+        ocr_result = reader.readtext(img)
+        ocr_text = "\n".join([line[1] for line in ocr_result])
 
     st.text_area("🧾 OCR Result", ocr_text, height=150)
 
@@ -82,20 +79,20 @@ Return:
             "temperature": 0.3
         }
 
-        with st.spinner("Talking to AI..."):
+        with st.spinner("💬 Talking to AI..."):
             response = requests.post(base_url, headers=headers, json=payload)
 
         if response.status_code == 200:
             result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            st.subheader("✅ AI Result")
-            st.markdown(content)
+            ai_output = result["choices"][0]["message"]["content"]
+            st.subheader("✅ AI Categorization")
+            st.markdown(ai_output)
 
-            # Save record to session
+            # Save to session
             st.session_state.data.append({
                 "Date": datetime.now().strftime("%Y-%m-%d"),
                 "Vendor": uploaded_file.name,
-                "AI Output": content,
+                "AI Output": ai_output,
                 "OCR": ocr_text
             })
         else:
@@ -105,11 +102,11 @@ Return:
 # --- DATA TABLE DISPLAY ---
 if st.session_state.data:
     df = pd.DataFrame(st.session_state.data)
-    st.subheader("📊 Receipt Log (This Session)")
+    st.subheader("📊 Session Receipt Log")
     st.dataframe(df)
 
     # --- EXPORT TO GOOGLE DRIVE ---
-    if st.button("💾 Save & Upload Monthly Report to Google Drive"):
+    if st.button("📤 Export Monthly Report to Google Drive"):
         now = datetime.now()
         filename = f"ReconMate_Report_{now.strftime('%Y_%m')}.xlsx"
         filepath = os.path.join("data", filename)
@@ -118,12 +115,12 @@ if st.session_state.data:
 
         try:
             gauth = GoogleAuth()
-            gauth.LocalWebserverAuth()  # Opens browser for first-time auth
+            gauth.LocalWebserverAuth()
             drive = GoogleDrive(gauth)
 
             file = drive.CreateFile({'title': filename})
             file.SetContentFile(filepath)
             file.Upload()
-            st.success(f"✅ Uploaded {filename} to Google Drive")
+            st.success(f"✅ Uploaded '{filename}' to Google Drive!")
         except Exception as e:
-            st.error(f"Upload failed: {e}")
+            st.error(f"Google Drive upload failed: {e}")
