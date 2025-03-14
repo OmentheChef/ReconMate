@@ -1,7 +1,9 @@
 streamlit
-pandas
 requests
-pydrive
-easyocr
-pillow
-torch
+pandas
+numpy
+pytesseract
+opencv-python
+Pillow
+pdf2image
+openpyxl
